@@ -6,16 +6,16 @@ export interface HowToPlayProps {
 }
 
 const STEPS = [
-  'Pick a piece from the tray.',
-  'Tap to place one, or drag across the table to lay a row.',
-  'Tap a placed piece to select it: rotate, move or remove it.',
-  'Press GO and watch the chain reaction.',
-  'Reach the goal for a star. Stay under par pieces and grab the star token for two more.',
+  'A piece is ready in the dock at the bottom. Drag across the table to lay a row of dominoes, or tap to place one.',
+  'Pick Hand to move the view, or tap a placed piece to turn, move or remove it.',
+  'Build a chain from Start to Goal, then press GO.',
+  'One star for reaching the Goal, one for staying within par, one for the ★ Bonus.',
 ]
 
 const SHORTCUTS: [string, string][] = [
-  ['1-8', 'Select a tray piece'],
+  ['1-8', 'Select a dock piece'],
   ['0 / Esc', 'Deselect tool or piece'],
+  ['V', 'Hand tool'],
   ['Arrows', 'Nudge ghost or selection'],
   ['Enter', 'Place at ghost'],
   ['Q / E', 'Rotate -15° / +15°'],
@@ -25,16 +25,19 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl/Cmd+Shift+Z', 'Redo'],
   ['Space', 'GO / Stop'],
   ['S', 'Slow motion'],
+  ['[ / ]', 'Turn the view'],
+  ['+ / −', 'Zoom'],
+  ['T', 'Top view'],
   ['C', 'Reset camera'],
   ['H', 'Help'],
 ]
 
 const GESTURES = [
-  'One-finger drag on the table: orbit the camera.',
-  'Two-finger drag: pan the camera.',
-  'Pinch: zoom.',
-  'Tap a tray piece, then tap or drag on the table to place it.',
-  'Drag a placed piece onto the tray to remove it.',
+  'Drag with a piece selected: lay it on the table.',
+  'Drag with Hand, or with two fingers: slide the view.',
+  'Pinch, or use the mouse wheel: zoom. Zoom right out to see the room.',
+  'Turn the view with the ⟲ ⟳ buttons on the right, or the [ and ] keys.',
+  'Drag a placed piece onto the dock to remove it.',
 ]
 
 export function HowToPlay({ onClose }: HowToPlayProps) {
@@ -72,7 +75,7 @@ export function HowToPlay({ onClose }: HowToPlayProps) {
             ))}
           </tbody>
         </table>
-        <h3>Touch gestures</h3>
+        <h3>Mouse and touch</h3>
         <ul className="how-to-play__gestures">
           {GESTURES.map((g) => (
             <li key={g}>{g}</li>

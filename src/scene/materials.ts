@@ -16,7 +16,7 @@ import { THEMES } from './themes.ts'
 let woodTexture: THREE.CanvasTexture | null = null
 
 /** 512² tileable wood-grain texture: base tone + noisy horizontal stripes. Built once, shared. */
-function woodGrainTexture(): THREE.CanvasTexture {
+export function woodGrainTexture(): THREE.CanvasTexture {
   if (woodTexture) return woodTexture
   const size = 512
   const canvas = document.createElement('canvas')
@@ -59,11 +59,22 @@ function woodGrainTexture(): THREE.CanvasTexture {
 
 const pipTextureCache = new Map<string, THREE.CanvasTexture>()
 
-/** A generic domino-face texture (divider line + two pip groups) in the given pip colour, cached. */
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '')
+  const bigint = parseInt(clean, 16)
+  return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255]
+}
+
+/**
+ * A realistic ivory-domino face texture in the given pip colour, cached per colour: an engraved
+ * divider groove, a small brass spinner at the centre, and two pip groups (six over three) drawn
+ * as drilled, slightly concave dots. 512² with the face inset in a central rect so it reads
+ * correctly when mapped onto a plane 1.5× the domino's side (see dominoPipTexture callers).
+ */
 export function dominoPipTexture(pipColor: string): THREE.CanvasTexture {
   const cached = pipTextureCache.get(pipColor)
   if (cached) return cached
-  const size = 256
+  const size = 512
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
@@ -74,33 +85,76 @@ export function dominoPipTexture(pipColor: string): THREE.CanvasTexture {
     return tex
   }
   ctx.clearRect(0, 0, size, size)
-  ctx.strokeStyle = pipColor
-  ctx.globalAlpha = 0.55
+
+  const faceX0 = 86
+  const faceY0 = 86
+  const faceX1 = 426
+  const faceY1 = 426
+  const w = faceX1 - faceX0
+  const h = faceY1 - faceY0
+  const midY = (faceY0 + faceY1) / 2
+  const [pr, pg, pb] = hexToRgb(pipColor)
+
+  // Engraved divider: a dark groove line with a lighter highlight just below it.
+  ctx.strokeStyle = `rgba(${pr},${pg},${pb},0.75)`
   ctx.lineWidth = 5
   ctx.beginPath()
-  ctx.moveTo(24, size / 2)
-  ctx.lineTo(size - 24, size / 2)
+  ctx.moveTo(faceX0, midY)
+  ctx.lineTo(faceX1, midY)
   ctx.stroke()
-  ctx.globalAlpha = 1
-  ctx.fillStyle = pipColor
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(faceX0, midY + 3.5)
+  ctx.lineTo(faceX1, midY + 3.5)
+  ctx.stroke()
 
-  const dot = (cx: number, cy: number, r: number) => {
+  // Brass spinner at the exact centre.
+  const cx0 = size / 2
+  const cy0 = size / 2
+  ctx.fillStyle = '#c9a24a'
+  ctx.beginPath()
+  ctx.arc(cx0, cy0, 7, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#8a6a2a'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.arc(cx0, cy0, 7, 0, Math.PI * 2)
+  ctx.stroke()
+
+  // Each pip: a radial gradient (opaque at centre, pipColor@0.85 at the rim) plus a small
+  // upper-left highlight arc, so it reads as a drilled, slightly concave dot.
+  const pip = (cx: number, cy: number, r: number) => {
+    const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+    gradient.addColorStop(0, pipColor)
+    gradient.addColorStop(1, `rgba(${pr},${pg},${pb},0.85)`)
+    ctx.fillStyle = gradient
     ctx.beginPath()
     ctx.arc(cx, cy, r, 0, Math.PI * 2)
     ctx.fill()
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+    ctx.lineWidth = 1.5
+    ctx.beginPath()
+    ctx.arc(cx, cy, r - 1, Math.PI * 1.05, Math.PI * 1.55)
+    ctx.stroke()
   }
-  // Three pips up top, four below: a purely decorative "domino face" pattern.
-  const r = size * 0.055
-  const topY = size * 0.27
-  const bottomY = size * 0.73
-  dot(size * 0.5, topY, r)
-  dot(size * 0.32, topY + size * 0.08, r)
-  dot(size * 0.68, topY - size * 0.08, r)
-  dot(size * 0.32, bottomY - size * 0.1, r)
-  dot(size * 0.68, bottomY - size * 0.1, r)
-  dot(size * 0.32, bottomY + size * 0.1, r)
-  dot(size * 0.68, bottomY + size * 0.1, r)
 
+  const pipRadius = 13
+  // Top half: six pips, two columns × three rows.
+  for (const x of [faceX0 + 0.32 * w, faceX0 + 0.68 * w]) {
+    for (const y of [faceY0 + 0.12 * h, faceY0 + 0.25 * h, faceY0 + 0.38 * h]) pip(x, y, pipRadius)
+  }
+  // Bottom half: three pips along a diagonal.
+  for (const [x, y] of [
+    [faceX0 + 0.3 * w, faceY0 + 0.62 * h],
+    [faceX0 + 0.5 * w, faceY0 + 0.75 * h],
+    [faceX0 + 0.7 * w, faceY0 + 0.88 * h],
+  ] as const) {
+    pip(x, y, pipRadius)
+  }
+
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
   tex.needsUpdate = true
   pipTextureCache.set(pipColor, tex)
   return tex
@@ -138,17 +192,23 @@ function buildMaterials(theme: ChapterTheme, quality: QualityTier): Record<Mater
     // `vertexColors` (that would multiply by a missing colour attribute and render black).
     domino: new THREE.MeshPhysicalMaterial({
       color: '#ffffff',
-      clearcoat: 0.6,
-      clearcoatRoughness: 0.3,
-      roughness: 0.5,
+      clearcoat: 1,
+      clearcoatRoughness: 0.12,
+      roughness: 0.32,
       metalness: 0,
+      sheen: 0.15,
+      sheenColor: '#fff4dc',
+      envMapIntensity: 1.1,
     }),
     dominoTall: new THREE.MeshPhysicalMaterial({
       color: '#ffffff',
-      clearcoat: 0.6,
-      clearcoatRoughness: 0.28,
-      roughness: 0.48,
+      clearcoat: 1,
+      clearcoatRoughness: 0.12,
+      roughness: 0.32,
       metalness: 0,
+      sheen: 0.15,
+      sheenColor: '#fff4dc',
+      envMapIntensity: 1.1,
     }),
     wood: new THREE.MeshStandardMaterial({ map: wood, color: '#c99a6b', roughness: 0.6, metalness: 0 }),
     woodDark: new THREE.MeshStandardMaterial({ map: wood, color: '#5a4030', roughness: 0.65, metalness: 0 }),

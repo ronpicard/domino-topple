@@ -3,14 +3,12 @@ import assert from 'node:assert/strict'
 
 import {
   defaultSave,
-  loadLayout,
   loadSave,
   parseSave,
   prefersReducedMotion,
-  writeLayout,
   writeSave,
 } from './storage.ts'
-import type { PlacedPiece, SaveData } from './types.ts'
+import type { SaveData } from './types.ts'
 
 class MemoryStorage {
   private store = new Map<string, string>()
@@ -160,81 +158,6 @@ test('writeSave: false on a throwing localStorage, never throws', () => {
 })
 
 // ---------------------------------------------------------------------------------------------
-// loadLayout / writeLayout
-
-test('loadLayout: empty array when nothing is stored', () => {
-  const storage = new MemoryStorage()
-  const layout = withStorage(storage, () => loadLayout(1))
-  assert.deepEqual(layout, [])
-})
-
-test('loadLayout: corrupt JSON yields empty array', () => {
-  const storage = new MemoryStorage()
-  storage.setItem('domino-topple:layout:1', 'not json{')
-  const layout = withStorage(storage, () => loadLayout(1))
-  assert.deepEqual(layout, [])
-})
-
-test('writeLayout then loadLayout round-trips valid pieces', () => {
-  const storage = new MemoryStorage()
-  const placed: PlacedPiece[] = [
-    { id: 'p1', kind: 'domino', x: 1, y: 0, z: 2, rotY: 0.1 },
-    { id: 'p2', kind: 'marble', x: -3, y: 0, z: 4, rotY: 0 },
-  ]
-  withStorage(storage, () => writeLayout(1, placed))
-  const loaded = withStorage(storage, () => loadLayout(1))
-  assert.deepEqual(loaded, placed)
-})
-
-test('loadLayout: drops pieces with unknown kind, non-finite numbers, or duplicate ids', () => {
-  const storage = new MemoryStorage()
-  const raw = [
-    { id: 'p1', kind: 'domino', x: 0, y: 0, z: 0, rotY: 0 },
-    { id: 'p2', kind: 'not-a-kind', x: 0, y: 0, z: 0, rotY: 0 },
-    { id: 'p3', kind: 'domino', x: Number.NaN, y: 0, z: 0, rotY: 0 },
-    { id: 'p1', kind: 'domino', x: 5, y: 0, z: 0, rotY: 0 }, // duplicate id
-    { id: 'p4', kind: 'pendulum', x: 0, y: 0, z: 0, rotY: 0 }, // fixture kind, not placeable
-  ]
-  storage.setItem('domino-topple:layout:1', JSON.stringify(raw))
-  const layout = withStorage(storage, () => loadLayout(1))
-  assert.deepEqual(layout, [{ id: 'p1', kind: 'domino', x: 0, y: 0, z: 0, rotY: 0 }])
-})
-
-test('loadLayout: caps at 400 pieces', () => {
-  const storage = new MemoryStorage()
-  const raw = Array.from({ length: 500 }, (_, i) => ({
-    id: `p${i}`,
-    kind: 'domino',
-    x: 0,
-    y: 0,
-    z: 0,
-    rotY: 0,
-  }))
-  storage.setItem('domino-topple:layout:1', JSON.stringify(raw))
-  const layout = withStorage(storage, () => loadLayout(1))
-  assert.equal(layout.length, 400)
-})
-
-test('loadLayout: a throwing localStorage yields empty array, never throws', () => {
-  const throwing = {
-    getItem() {
-      throw new Error('boom')
-    },
-  }
-  const layout = withStorage(throwing, () => loadLayout(1))
-  assert.deepEqual(layout, [])
-})
-
-test('writeLayout: false on a throwing localStorage, never throws', () => {
-  const throwing = {
-    setItem() {
-      throw new Error('boom')
-    },
-  }
-  const ok = withStorage(throwing, () => writeLayout(1, []))
-  assert.equal(ok, false)
-})
-
 test('parseSave: drops out-of-range stars, negative piece counts and the sandbox id', () => {
   const save = parseSave({
     version: 1,

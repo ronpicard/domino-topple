@@ -1,23 +1,28 @@
 /*
- * Scene interaction: the orbiting/panning/zooming camera rig, and the build-mode gesture layer
+ * Scene interaction: the panning/zooming camera rig, and the build-mode gesture layer
  * (hover, tap/drag placement, path placement, select/move/remove). Both read native pointer
  * events straight off the canvas through one shared arbiter, so a build gesture (placing or
- * dragging a piece) is always asked first and the orbit camera never steals its pointer.
+ * dragging a piece) is always asked first and the camera never steals its pointer. Rotation
+ * (yaw/pitch) only ever comes from the explicit camera commands (orbitLeft/orbitRight/toggleTop),
+ * never from a pointer drag.
  */
 import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
-import { PIECES } from '../game/pieces.ts'
+import { PIECES, pieceFootprint, pieceHeightRange } from '../game/pieces.ts'
 import { posesAlongPath, resolveCandidate } from '../game/placement.ts'
 import type { Candidate } from '../game/placement.ts'
+import { fitPose } from './framing.ts'
+import type { CamPose, Insets, Viewport } from './framing.ts'
 import { GestureContext, SimContext, TRAY_DROP_ATTR } from './sceneApi.ts'
-import type { PlayMode } from './sceneApi.ts'
+import { ROOM_CEILING_Y, ROOM_RADIUS } from './props/Room.tsx'
+import type { CameraCommand, PlayMode, ViewInsets } from './sceneApi.ts'
 import type {
-  CameraView,
   EditorAction,
   EditorState,
   LevelDef,
   PlaceableKind,
+  PlacedPiece,
   Vec3,
 } from '../game/types.ts'
 
@@ -91,65 +96,95 @@ function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
 }
 
-interface CamState {
-  target: Vec3
-  distance: number
-  yaw: number
-  pitch: number
-}
+const MIN_DISTANCE = 35
+const PITCH_MIN = 0.3
+const PITCH_MAX = 1.45
+/** Pitch the camera settles to when fully zoomed out: low enough to take in the room's walls. */
+const OVERVIEW_PITCH = 0.32
+/** Clearance kept between the eye and the room's wall / ceiling. */
+const ROOM_MARGIN = 30
 
-const MAX_DISTANCE = 520
-const VERTICAL_FOV = (35 * Math.PI) / 180
-
-/**
- * The level's default view fitted to the viewport. Portrait screens turn the table a quarter so
- * its long side runs up the screen (start near the thumb, goal at the top), and any screen too
- * narrow for the table pulls the camera back until the table's width fits.
- */
-function framedCamera(view: CameraView, table: LevelDef['table'], aspect: number): CamState {
-  const s = cloneCamera(view)
-  const portrait = aspect < 1
-  if (portrait) s.yaw -= Math.PI / 2
-  const across = portrait ? table.depth : table.width
-  const halfHorizontalFov = Math.atan(Math.tan(VERTICAL_FOV / 2) * aspect)
-  const fit = (across / 2 + 10) / Math.tan(halfHorizontalFov)
-  s.distance = clamp(Math.max(s.distance, fit), 35, MAX_DISTANCE)
-  return s
-}
-
-function cloneCamera(view: CameraView): CamState {
-  return {
-    target: [view.target[0], view.target[1], view.target[2]],
-    distance: view.distance,
-    yaw: view.yaw,
-    pitch: view.pitch,
-  }
-}
-
-function clampCamera(s: CamState, table: LevelDef['table']): void {
-  s.pitch = clamp(s.pitch, 0.25, 1.35)
-  s.distance = clamp(s.distance, 35, MAX_DISTANCE)
+function clampCamera(s: CamPose, table: LevelDef['table'], maxDistance: number): void {
+  s.pitch = clamp(s.pitch, PITCH_MIN, PITCH_MAX)
   s.target[0] = clamp(s.target[0], -table.width / 2, table.width / 2)
   s.target[2] = clamp(s.target[2], -table.depth / 2, table.depth / 2)
   s.target[1] = clamp(s.target[1], 0, 30)
+  // Never back the eye out through the room's wall or ceiling (Room.tsx): the wall is only drawn
+  // from the inside, so from beyond it the whole room vanishes.
+  const wallRoom = (ROOM_RADIUS - ROOM_MARGIN - Math.hypot(s.target[0], s.target[2])) / Math.cos(s.pitch)
+  const ceilingRoom = (ROOM_CEILING_Y - ROOM_MARGIN - s.target[1]) / Math.sin(s.pitch)
+  s.distance = clamp(s.distance, MIN_DISTANCE, Math.min(maxDistance, wallRoom, ceilingRoom))
 }
 
-/** Move the camera target in the ground plane, screen-relative to its current yaw. */
-function panBy(s: CamState, dxPx: number, dyPx: number): void {
-  const speed = s.distance * 0.0016
-  const rightX = Math.cos(s.yaw)
-  const rightZ = -Math.sin(s.yaw)
-  const fwdX = Math.sin(s.yaw)
-  const fwdZ = Math.cos(s.yaw)
-  s.target[0] -= (dxPx * rightX - dyPx * fwdX) * speed
-  s.target[2] -= (dxPx * rightZ - dyPx * fwdZ) * speed
+/**
+ * The pitch a zoom level implies while not in top view: the level's own framing pitch up to the
+ * fitted distance, easing down to OVERVIEW_PITCH at the zoom-out limit (twice the fitted
+ * distance), so backing off from the table turns into stepping back to look around the room.
+ */
+function pitchForDistance(distance: number, fittedDistance: number, framingPitch: number): number {
+  const t = clamp((distance - fittedDistance) / Math.max(1, fittedDistance), 0, 1)
+  const eased = t * t * (3 - 2 * t)
+  return framingPitch + (OVERVIEW_PITCH - framingPitch) * eased
 }
 
-function toNDC(e: PointerEvent, canvas: HTMLCanvasElement): THREE.Vector2 {
+/** The 8 corners of the table slab, including its border, at floor and table-top height. */
+function tableFramingPoints(table: LevelDef['table']): Vec3[] {
+  const hx = table.width / 2 + 8
+  const hz = table.depth / 2 + 8
+  const pts: Vec3[] = []
+  for (const x of [-hx, hx]) {
+    for (const z of [-hz, hz]) {
+      for (const y of [-4, 0]) pts.push([x, y, z])
+    }
+  }
+  return pts
+}
+
+/** The 4 corners of a fixture's footprint, at the top of its bounding box. */
+function fixtureFramingPoints(fixture: PlacedPiece): Vec3[] {
+  const fp = pieceFootprint(fixture)
+  const top = pieceHeightRange(fixture)[1]
+  const cos = Math.cos(fp.rotY)
+  const sin = Math.sin(fp.rotY)
+  const pts: Vec3[] = []
+  for (const lx of [-fp.hx, fp.hx]) {
+    for (const lz of [-fp.hz, fp.hz]) {
+      pts.push([fp.cx + lx * cos + lz * sin, top, fp.cz - lx * sin + lz * cos])
+    }
+  }
+  return pts
+}
+
+function framingPoints(level: LevelDef): Vec3[] {
+  const pts = tableFramingPoints(level.table)
+  for (const fixture of level.fixtures) pts.push(...fixtureFramingPoints(fixture))
+  return pts
+}
+
+/**
+ * The level's default view fitted to the viewport, minus the HUD insets. Portrait screens turn
+ * the table a quarter so its long side runs up the screen (start near the thumb, goal at the
+ * top); `fitPose` then pulls the camera to whatever distance and target keep the table and every
+ * fixture on screen.
+ */
+function framedCamera(level: LevelDef, viewport: Viewport, insets: Insets): CamPose {
+  const aspect = viewport.width / Math.max(1, viewport.height)
+  const view = level.camera
+  const portrait = aspect < 1
+  const base: CamPose = {
+    target: [view.target[0], view.target[1], view.target[2]],
+    distance: view.distance,
+    yaw: portrait ? view.yaw - Math.PI / 2 : view.yaw,
+    pitch: view.pitch,
+  }
+  return fitPose(base, viewport, insets, framingPoints(level))
+}
+
+function ndcFromClient(clientX: number, clientY: number, canvas: HTMLCanvasElement): THREE.Vector2 {
   const rect = canvas.getBoundingClientRect()
   return new THREE.Vector2(
-    ((e.clientX - rect.left) / rect.width) * 2 - 1,
-    -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1,
   )
 }
 
@@ -218,56 +253,128 @@ export function CameraRig({
   mode,
   cameraResetKey,
   reducedMotion,
+  cameraCommand,
+  viewInsets,
 }: {
   level: LevelDef
   mode: PlayMode
   cameraResetKey: number
   reducedMotion: boolean
+  cameraCommand: CameraCommand | null
+  viewInsets: ViewInsets
 }) {
   const camera = useThree((s) => s.camera)
   const gl = useThree((s) => s.gl)
+  const size = useThree((s) => s.size)
   const gesture = useContext(GestureContext)
   const sim = useContext(SimContext)
 
-  const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height))
-  const portrait = aspect < 1
-  const current = useRef<CamState>(framedCamera(level.camera, level.table, aspect))
-  const goal = useRef<CamState>(framedCamera(level.camera, level.table, aspect))
+  const raycaster = useMemo(() => new THREE.Raycaster(), [])
+  const groundPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
+
+  const levelRef = useRef(level)
+  levelRef.current = level
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+
+  const current = useRef<CamPose>(framedCamera(level, size, viewInsets))
+  const goal = useRef<CamPose>(framedCamera(level, size, viewInsets))
+  const maxDistance = useRef(goal.current.distance * 2)
+  const fittedDistance = useRef(goal.current.distance)
+  const defaultPitch = useRef(goal.current.pitch)
+  const rememberedPitch = useRef<number | null>(null)
+  const userMoved = useRef(false)
+  const followSuspended = useRef(false)
+  const lastFramed = useRef({ width: size.width, height: size.height, insets: viewInsets })
   const preRunTarget = useRef<Vec3 | null>(null)
   const prevMode = useRef<PlayMode>(mode)
   const prevLevelId = useRef<number>(level.id)
+  const prevCmdSeq = useRef<number | null>(cameraCommand ? cameraCommand.seq : null)
 
   const pointers = useRef(new Map<number, { x: number; y: number }>())
-  const dragMode = useRef<'none' | 'orbit' | 'pan'>('none')
-  const pinch = useRef<{ dist: number; cx: number; cy: number } | null>(null)
+  const dragMode = useRef<'none' | 'grabPan'>('none')
+  const pinch = useRef<{ dist: number } | null>(null)
+  const panAnchor = useRef<THREE.Vector3 | null>(null)
+
+  function raycastGround(ndc: THREE.Vector2): THREE.Vector3 | null {
+    raycaster.setFromCamera(ndc, camera)
+    const hit = new THREE.Vector3()
+    return raycaster.ray.intersectPlane(groundPlane, hit) ? hit : null
+  }
+
+  function markCameraGesture() {
+    userMoved.current = true
+    if (mode === 'run' || mode === 'result') followSuspended.current = true
+  }
+
+  /** Zoom toward a screen point (wheel, pinch): keep the ground point under it roughly fixed. */
+  function zoomTowardScreenPoint(clientX: number, clientY: number, factor: number) {
+    const table = levelRef.current.table
+    const oldDistance = goal.current.distance
+    const newDistance = clamp(oldDistance * factor, MIN_DISTANCE, maxDistance.current)
+    const hit = raycastGround(ndcFromClient(clientX, clientY, gl.domElement))
+    goal.current.distance = newDistance
+    if (hit && oldDistance > 0) {
+      const t = 1 - newDistance / oldDistance
+      goal.current.target[0] += (hit.x - goal.current.target[0]) * t
+      goal.current.target[2] += (hit.z - goal.current.target[2]) * t
+    }
+    clampCamera(goal.current, table, maxDistance.current)
+  }
 
   // Level change: snap immediately (no smoothing).
   useEffect(() => {
     if (prevLevelId.current !== level.id) {
-      current.current = framedCamera(level.camera, level.table, aspect)
-      goal.current = framedCamera(level.camera, level.table, aspect)
+      current.current = framedCamera(level, size, viewInsets)
+      goal.current = framedCamera(level, size, viewInsets)
+      maxDistance.current = goal.current.distance * 2
+      fittedDistance.current = goal.current.distance
+      defaultPitch.current = goal.current.pitch
+      rememberedPitch.current = null
+      userMoved.current = false
+      lastFramed.current = { width: size.width, height: size.height, insets: viewInsets }
       prevLevelId.current = level.id
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level])
 
-  // Rotating the phone re-frames the table.
-  const prevPortrait = useRef(portrait)
+  // Reset-view button: ease back to the level's default framing.
   useEffect(() => {
-    if (prevPortrait.current === portrait) return
-    prevPortrait.current = portrait
-    goal.current = framedCamera(level.camera, level.table, aspect)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [portrait])
-
-  // Reset-view button: smoothly ease back to the level's default framing.
-  useEffect(() => {
-    goal.current = framedCamera(level.camera, level.table, aspect)
-    clampCamera(goal.current, level.table)
+    const fitted = framedCamera(level, size, viewInsets)
+    goal.current = fitted
+    maxDistance.current = fitted.distance * 2
+    fittedDistance.current = fitted.distance
+    defaultPitch.current = fitted.pitch
+    rememberedPitch.current = null
+    userMoved.current = false
+    clampCamera(goal.current, level.table, maxDistance.current)
+    lastFramed.current = { width: size.width, height: size.height, insets: viewInsets }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraResetKey])
 
-  // Remember the build-mode target across a run, and restore it smoothly on return.
+  // Re-frame when the HUD insets change or the canvas resizes by more than 40px, but only while
+  // the player hasn't taken the camera since the last framing.
+  useEffect(() => {
+    const last = lastFramed.current
+    const sizeChanged = Math.abs(size.width - last.width) > 40 || Math.abs(size.height - last.height) > 40
+    const insetsChanged =
+      viewInsets.top !== last.insets.top ||
+      viewInsets.right !== last.insets.right ||
+      viewInsets.bottom !== last.insets.bottom ||
+      viewInsets.left !== last.insets.left
+    if (!sizeChanged && !insetsChanged) return
+    lastFramed.current = { width: size.width, height: size.height, insets: viewInsets }
+    if (userMoved.current) return
+    const fitted = framedCamera(level, size, viewInsets)
+    goal.current = fitted
+    maxDistance.current = fitted.distance * 2
+    fittedDistance.current = fitted.distance
+    defaultPitch.current = fitted.pitch
+    clampCamera(goal.current, level.table, maxDistance.current)
+  })
+
+  // Remember the build-mode target across a run, and restore it smoothly on return. A fresh run
+  // also clears the "user took the camera" flag that pauses activity-follow.
   useEffect(() => {
     if (prevMode.current === 'build' && mode !== 'build') {
       const t = current.current.target
@@ -276,8 +383,43 @@ export function CameraRig({
       goal.current.target = preRunTarget.current
       preRunTarget.current = null
     }
+    if (mode === 'run' && prevMode.current !== 'run') followSuspended.current = false
     prevMode.current = mode
   }, [mode])
+
+  // Camera button / keyboard commands. `seq` starts equal to the ref, so the initial value on
+  // mount is never acted on.
+  useEffect(() => {
+    if (!cameraCommand) return
+    if (cameraCommand.seq === prevCmdSeq.current) return
+    prevCmdSeq.current = cameraCommand.seq
+    markCameraGesture()
+    switch (cameraCommand.kind) {
+      case 'orbitLeft':
+        goal.current.yaw -= Math.PI / 4
+        break
+      case 'orbitRight':
+        goal.current.yaw += Math.PI / 4
+        break
+      case 'zoomIn':
+        goal.current.distance = clamp(goal.current.distance * 0.75, MIN_DISTANCE, maxDistance.current)
+        break
+      case 'zoomOut':
+        goal.current.distance = clamp(goal.current.distance * 1.33, MIN_DISTANCE, maxDistance.current)
+        break
+      case 'toggleTop':
+        if (goal.current.pitch < 1.3) {
+          rememberedPitch.current = goal.current.pitch
+          goal.current.pitch = 1.45
+        } else {
+          goal.current.pitch = rememberedPitch.current ?? defaultPitch.current
+          rememberedPitch.current = null
+        }
+        break
+    }
+    clampCamera(goal.current, level.table, maxDistance.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraCommand, mode, level])
 
   useGestureArbiter(gl.domElement, 'camera', {
     onPointerDown: (e) => {
@@ -285,13 +427,14 @@ export function CameraRig({
       gesture.current.cameraGestureActive = true
       gesture.current.lastCameraGestureAt = performance.now()
       if (pointers.current.size >= 2) {
-        dragMode.current = 'pan'
         const pts = Array.from(pointers.current.values()).slice(0, 2)
-        pinch.current = {
-          dist: Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y),
-          cx: (pts[0].x + pts[1].x) / 2,
-          cy: (pts[0].y + pts[1].y) / 2,
-        }
+        const cx = (pts[0].x + pts[1].x) / 2
+        const cy = (pts[0].y + pts[1].y) / 2
+        pinch.current = { dist: Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y) }
+        panAnchor.current = raycastGround(ndcFromClient(cx, cy, gl.domElement))
+        dragMode.current = 'grabPan'
+        gl.domElement.style.cursor = 'grabbing'
+        markCameraGesture()
         gl.domElement.setPointerCapture(e.pointerId)
         return
       }
@@ -299,15 +442,15 @@ export function CameraRig({
         dragMode.current = 'none'
         return
       }
-      const isPan = e.button === 2 || (e.button === 0 && e.shiftKey)
-      dragMode.current = isPan ? 'pan' : 'orbit'
+      dragMode.current = 'grabPan'
+      panAnchor.current = raycastGround(ndcFromClient(e.clientX, e.clientY, gl.domElement))
+      gl.domElement.style.cursor = 'grabbing'
+      markCameraGesture()
       gl.domElement.setPointerCapture(e.pointerId)
     },
     onPointerMove: (e) => {
       const p = pointers.current.get(e.pointerId)
       if (!p) return
-      const prevX = p.x
-      const prevY = p.y
       p.x = e.clientX
       p.y = e.clientY
       if (pointers.current.size >= 2) {
@@ -318,22 +461,39 @@ export function CameraRig({
         const prev = pinch.current
         if (prev && prev.dist > 0 && dist > 0) {
           gesture.current.lastCameraGestureAt = performance.now()
-          goal.current.distance = clamp(goal.current.distance / (dist / prev.dist), 35, MAX_DISTANCE)
-          panBy(goal.current, cx - prev.cx, cy - prev.cy)
-          clampCamera(goal.current, level.table)
+          // Pinch zooms about the midpoint, and midpoint movement pans — both read off the same
+          // two touches at once.
+          zoomTowardScreenPoint(cx, cy, prev.dist / dist)
+          const hit = raycastGround(ndcFromClient(cx, cy, gl.domElement))
+          if (panAnchor.current && hit) {
+            const dx = panAnchor.current.x - hit.x
+            const dz = panAnchor.current.z - hit.z
+            goal.current.target[0] += dx
+            goal.current.target[2] += dz
+            current.current.target[0] += dx
+            current.current.target[2] += dz
+          }
+          clampCamera(goal.current, levelRef.current.table, maxDistance.current)
+          clampCamera(current.current, levelRef.current.table, maxDistance.current)
         }
-        pinch.current = { dist, cx, cy }
+        pinch.current = { dist }
         return
       }
-      if (dragMode.current === 'orbit') {
+      if (dragMode.current === 'grabPan') {
         gesture.current.lastCameraGestureAt = performance.now()
-        goal.current.yaw -= (e.clientX - prevX) * 0.006
-        goal.current.pitch = clamp(goal.current.pitch - (e.clientY - prevY) * 0.006, 0.25, 1.35)
-        clampCamera(goal.current, level.table)
-      } else if (dragMode.current === 'pan') {
-        gesture.current.lastCameraGestureAt = performance.now()
-        panBy(goal.current, e.clientX - prevX, e.clientY - prevY)
-        clampCamera(goal.current, level.table)
+        // Re-raycast the pointer and shift the target by (anchor - hit): the world point grabbed
+        // at gesture start stays glued to the pointer, with no smoothing lag.
+        const hit = raycastGround(ndcFromClient(e.clientX, e.clientY, gl.domElement))
+        if (panAnchor.current && hit) {
+          const dx = panAnchor.current.x - hit.x
+          const dz = panAnchor.current.z - hit.z
+          goal.current.target[0] += dx
+          goal.current.target[2] += dz
+          current.current.target[0] += dx
+          current.current.target[2] += dz
+        }
+        clampCamera(goal.current, levelRef.current.table, maxDistance.current)
+        clampCamera(current.current, levelRef.current.table, maxDistance.current)
       }
     },
     onPointerUp: (e) => {
@@ -343,8 +503,18 @@ export function CameraRig({
       if (pointers.current.size === 0) {
         dragMode.current = 'none'
         gesture.current.cameraGestureActive = false
+        panAnchor.current = null
       } else if (pointers.current.size === 1) {
-        dragMode.current = gesture.current.buildGestureActive ? 'none' : 'orbit'
+        // Dropped from two fingers to one: keep panning with the remaining finger.
+        const remaining = Array.from(pointers.current.values())[0]
+        if (gesture.current.buildGestureActive) {
+          dragMode.current = 'none'
+          panAnchor.current = null
+        } else {
+          dragMode.current = 'grabPan'
+          panAnchor.current = raycastGround(ndcFromClient(remaining.x, remaining.y, gl.domElement))
+          gl.domElement.style.cursor = 'grabbing'
+        }
       }
     },
     onPointerCancel: (e) => {
@@ -353,6 +523,7 @@ export function CameraRig({
       if (pointers.current.size === 0) {
         dragMode.current = 'none'
         gesture.current.cameraGestureActive = false
+        panAnchor.current = null
       }
     },
   })
@@ -363,25 +534,41 @@ export function CameraRig({
       e.preventDefault()
       gesture.current.cameraGestureActive = true
       gesture.current.lastCameraGestureAt = performance.now()
-      goal.current.distance = clamp(goal.current.distance * Math.exp(e.deltaY * 0.0015), 35, MAX_DISTANCE)
+      userMoved.current = true
+      if (modeRef.current === 'run' || modeRef.current === 'result') followSuspended.current = true
+      zoomTowardScreenPoint(e.clientX, e.clientY, Math.exp(e.deltaY * 0.0015))
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gl, gesture])
+
+  // Right-button drag pans the camera like any other button (see the pointer-down handler
+  // above); stop the browser's own context menu from popping up over it.
+  useEffect(() => {
+    const el = gl.domElement
+    const onContextMenu = (e: Event) => e.preventDefault()
+    el.addEventListener('contextmenu', onContextMenu)
+    return () => el.removeEventListener('contextmenu', onContextMenu)
+  }, [gl])
 
   useFrame((_, dt) => {
     const dtClamped = Math.min(dt, 0.1)
-    if ((mode === 'run' || mode === 'result') && !reducedMotion) {
+    if ((mode === 'run' || mode === 'result') && !reducedMotion && !followSuspended.current) {
       const activeSim = sim.current
       const focus = activeSim ? activeSim.activityFocus() : null
-      if (focus && performance.now() - gesture.current.lastCameraGestureAt > 2500) {
-        const a = 1 - Math.exp(-dtClamped / 1.5)
+      if (focus) {
+        const a = 1 - Math.exp(-dtClamped / 1.2)
         goal.current.target[0] += (focus[0] - goal.current.target[0]) * a
-        goal.current.target[1] += (focus[1] * 0.5 - goal.current.target[1]) * a
         goal.current.target[2] += (focus[2] - goal.current.target[2]) * a
       }
     }
-    clampCamera(goal.current, level.table)
+    // Outside top view the pitch follows the zoom: framing pitch near the table, overview pitch
+    // when backed right off.
+    if (goal.current.pitch < 1.3) {
+      goal.current.pitch = pitchForDistance(goal.current.distance, fittedDistance.current, defaultPitch.current)
+    }
+    clampCamera(goal.current, level.table, maxDistance.current)
     const a = 1 - Math.exp(-dtClamped / 0.12)
     const cur = current.current
     const g = goal.current
@@ -391,7 +578,7 @@ export function CameraRig({
     cur.distance += (g.distance - cur.distance) * a
     cur.yaw += (g.yaw - cur.yaw) * a
     cur.pitch += (g.pitch - cur.pitch) * a
-    clampCamera(cur, level.table)
+    clampCamera(cur, level.table, maxDistance.current)
     const cp = Math.cos(cur.pitch)
     camera.position.set(
       cur.target[0] + cur.distance * Math.sin(cur.yaw) * cp,
@@ -438,6 +625,8 @@ export function BuildLayer({
   const grabOffset = useRef<{ dx: number; dz: number }>({ dx: 0, dz: 0 })
   const activePointerId = useRef<number | null>(null)
   const clickCandidate = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  /** The placed piece under a placing tool's pointer-down, so a plain tap on it selects it. */
+  const tapPieceId = useRef<string | null>(null)
 
   const [preview, setPreview] = useState<Candidate[]>([])
 
@@ -494,6 +683,9 @@ export function BuildLayer({
   useGestureArbiter(gl.domElement, 'build', {
     onPointerDown: (e) => {
       if (modeRef.current !== 'build') return
+      // Build gestures only start for the primary button (touch/pen report 0 too), and not for a
+      // shift+left click on a mouse — that falls through to the camera and slides the view.
+      if (e.button !== 0 || (e.pointerType === 'mouse' && e.shiftKey)) return
       if (gestureActive.current) {
         // A second pointer arrived mid-gesture: cancel and hand over to the camera (pinch/pan).
         cancelGesture()
@@ -507,6 +699,7 @@ export function BuildLayer({
         activePointerId.current = e.pointerId
         gl.domElement.setPointerCapture(e.pointerId)
         pathPoints.current = hit.x !== null && hit.z !== null ? [[hit.x, hit.z]] : []
+        tapPieceId.current = hit.pieceId && ed.placed.some((p) => p.id === hit.pieceId && !p.locked) ? hit.pieceId : null
         if (hit.x !== null && hit.z !== null) dispatchRef.current({ type: 'hover', x: hit.x, z: hit.z })
         setPreview([])
         return
@@ -523,7 +716,7 @@ export function BuildLayer({
         dispatchRef.current({ type: 'select', id: piece.id })
         return
       }
-      // Empty space or a locked fixture: not a build gesture; the camera is free to orbit.
+      // Empty space or a locked fixture: not a build gesture; the camera is free to grab-pan.
       // Track it in case it turns out to be a plain click (deselect).
       clickCandidate.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY }
     },
@@ -560,9 +753,9 @@ export function BuildLayer({
           if (hit.x !== null && hit.z !== null) dispatchRef.current({ type: 'hover', x: hit.x, z: hit.z })
           gl.domElement.style.cursor = 'crosshair'
         } else {
-          const hit = pickAt(e)
-          const movable = hit.pieceId ? ed.placed.some((p) => p.id === hit.pieceId) : false
-          gl.domElement.style.cursor = movable ? 'grab' : 'default'
+          // The Hand tool always offers a grab: empty table grab-pans the view, a placed piece
+          // grab-moves it.
+          gl.domElement.style.cursor = 'grab'
         }
       }
     },
@@ -578,7 +771,12 @@ export function BuildLayer({
           const lastPoint: [number, number] | null =
             hit.x !== null && hit.z !== null ? [hit.x, hit.z] : (pts[0] ?? null)
           const points = length < 2 ? (lastPoint ? [lastPoint] : []) : pts
-          if (points.length > 0) dispatchRef.current({ type: 'placePath', points })
+          if (length < 2 && tapPieceId.current && hit.pieceId === tapPieceId.current) {
+            // A tap on a placed piece edits it rather than trying to place on top of it.
+            dispatchRef.current({ type: 'select', id: tapPieceId.current })
+          } else if (points.length > 0) {
+            dispatchRef.current({ type: 'placePath', points })
+          }
         } else if (movingId.current) {
           const droppedOnTray = document.elementFromPoint(e.clientX, e.clientY)?.closest(`[${TRAY_DROP_ATTR}]`)
           if (droppedOnTray) {
@@ -598,6 +796,7 @@ export function BuildLayer({
         }
         if (gl.domElement.hasPointerCapture(e.pointerId)) gl.domElement.releasePointerCapture(e.pointerId)
         pathPoints.current = []
+        tapPieceId.current = null
         movingId.current = null
         activePointerId.current = null
         gestureActive.current = false
@@ -637,4 +836,8 @@ export function BuildLayer({
       ))}
     </group>
   )
+}
+
+function toNDC(e: PointerEvent, canvas: HTMLCanvasElement): THREE.Vector2 {
+  return ndcFromClient(e.clientX, e.clientY, canvas)
 }

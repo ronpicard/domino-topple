@@ -24,11 +24,11 @@ export interface PartMeshProps {
 }
 
 const IDENTITY: Quat = [0, 0, 0, 1]
-const DEFAULT_PIP_COLOR = '#1c1712'
+const DEFAULT_PIP_COLOR = '#14110e'
 
 const GHOST_VALID = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.45, depthWrite: false })
 const GHOST_INVALID = new THREE.MeshBasicMaterial({ color: '#ff4d4d', transparent: true, opacity: 0.45, depthWrite: false })
-const SELECT_OUTLINE = new THREE.MeshBasicMaterial({ color: '#e8590c', side: THREE.BackSide, transparent: true, opacity: 0.9 })
+const SELECT_OUTLINE = new THREE.MeshBasicMaterial({ color: '#f6b73c', side: THREE.BackSide, transparent: true, opacity: 0.9 })
 
 /** Small bevel radius for a decorative box (no physics rounding requested), clamped to fit. */
 function cosmeticRadius(half: Vec3): number {
@@ -211,11 +211,24 @@ function DominoVisual({ part, material, ud, shadow, selected }: { part: PartDef;
   const shape = part.colliders[0]?.shape
   const half: Vec3 = shape && shape.type === 'box' ? shape.half : [0.6, 4, 2]
   const radius = shape && shape.type === 'box' ? shape.radius : undefined
-  const bodyGeometry = useMemo(() => boxGeometry(half, radius), [half, radius])
+  // No physics radius: use a generous cosmetic bevel so the ivory tile's edges catch the light.
+  const bodyGeometry = useMemo(
+    () => (radius === undefined ? new RoundedBoxGeometry(2 * half[0], 2 * half[1], 2 * half[2], 3, 0.22) : boxGeometry(half, radius)),
+    [half, radius],
+  )
   const pipTexture = useMemo(() => dominoPipTexture(DEFAULT_PIP_COLOR), [])
   const pipGeometry = useMemo(() => new THREE.PlaneGeometry(half[2] * 1.5, half[1] * 1.5), [half])
   const pipMaterial = useMemo(
-    () => new THREE.MeshStandardMaterial({ map: pipTexture, transparent: true, alphaTest: 0.5, roughness: 0.6 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: pipTexture,
+        transparent: true,
+        alphaTest: 0.4,
+        roughness: 0.45,
+        metalness: 0.05,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+      }),
     [pipTexture],
   )
   useEffect(() => () => {

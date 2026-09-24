@@ -1,8 +1,9 @@
 /*
- * First-visit coach marks on level 1: three steps that advance themselves as the player follows
- * along (pick a tool, place a few pieces, press GO), with a Skip button.
+ * First-visit coach mark on level 1. The status line and the Start / Goal tags already explain how
+ * to lay a row, so this only steps in once a few dominoes are down, to point at GO. It finishes when
+ * the player presses GO, or with its Skip button.
  */
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import type { EditorState } from '../game/types.ts'
 import type { PlayMode } from '../scene/sceneApi.ts'
 
@@ -13,30 +14,22 @@ export interface CoachMarkProps {
   onSkip: () => void
 }
 
-const STEPS = [
-  { anchor: 'coach--tray', text: 'Pick the domino' },
-  { anchor: 'coach--table', text: 'Drag across the felt to lay a row' },
-  { anchor: 'coach--go', text: 'Press GO' },
-] as const
+/** Pieces on the table before the coach mark points at GO. */
+const PIECES_BEFORE_GO = 3
 
 export function CoachMark({ editor, mode, onDone, onSkip }: CoachMarkProps) {
-  const [step, setStep] = useState(0)
+  const ready = editor.placed.length >= PIECES_BEFORE_GO
 
   useEffect(() => {
-    if (step === 0 && editor.tool) setStep(1)
-    else if (step === 1 && editor.placed.length >= 3) setStep(2)
-  }, [step, editor.tool, editor.placed.length])
+    if (ready && mode !== 'build') onDone()
+  }, [ready, mode, onDone])
 
-  useEffect(() => {
-    if (step === 2 && mode !== 'build') onDone()
-  }, [step, mode, onDone])
-
-  const current = STEPS[step]
+  if (!ready) return null
 
   return (
-    <div className={`coach-mark coach-mark--${current.anchor}`} role="status">
+    <div className="coach-mark coach-mark--coach--go" role="status">
       <div className="coach-mark__bubble">
-        <span>{current.text}</span>
+        <span>Finish the row to the Goal, then press GO</span>
         <button type="button" className="coach-mark__skip" onClick={onSkip}>
           Skip
         </button>

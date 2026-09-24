@@ -223,7 +223,7 @@ function PieceGroup({
 // Dominoes: rendered through one InstancedMesh per kind for the bodies plus one for their pip
 // planes (two instances per domino, one per ±X face).
 
-const SELECTED_TINT = new THREE.Color('#ff9a5c')
+const SELECTED_TINT = new THREE.Color('#f6b73c')
 
 function DominoInstances({
   kind,
@@ -257,7 +257,16 @@ function DominoInstances({
   const pipGeometry = useMemo(() => new THREE.PlaneGeometry(half[2] * 1.5, half[1] * 1.5), [half])
   const pipTexture = useMemo(() => dominoPipTexture(theme.dominoPip), [theme.dominoPip])
   const pipMaterial = useMemo(
-    () => new THREE.MeshStandardMaterial({ map: pipTexture, transparent: true, alphaTest: 0.5, roughness: 0.6 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: pipTexture,
+        transparent: true,
+        alphaTest: 0.4,
+        roughness: 0.45,
+        metalness: 0.05,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+      }),
     [pipTexture],
   )
   useEffect(
@@ -373,6 +382,12 @@ function DominoInstances({
     body.instanceMatrix.needsUpdate = true
     if (body.instanceColor) body.instanceColor.needsUpdate = true
     pip.instanceMatrix.needsUpdate = true
+    // InstancedMesh caches its bounds on the first raycast; drop them so hit-testing sees the
+    // instances as they are now (it recomputes lazily, only when a raycast happens).
+    body.boundingSphere = null
+    body.boundingBox = null
+    pip.boundingSphere = null
+    pip.boundingBox = null
     body.userData.instancePieceIds = bodyIds
     pip.userData.instancePieceIds = pipIds
   })

@@ -22,6 +22,20 @@ export type RunEvent =
   | { type: 'goal'; position: Vec3 }
   | { type: 'star'; position: Vec3 }
 
+/** A one-shot camera request from the HUD's camera buttons or keyboard. A new `seq` triggers it. */
+export interface CameraCommand {
+  kind: 'orbitLeft' | 'orbitRight' | 'zoomIn' | 'zoomOut' | 'toggleTop'
+  seq: number
+}
+
+/** Screen space (CSS px) covered by the HUD on each side, so the camera frames the table in the rest. */
+export interface ViewInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
 export interface SceneProps {
   level: LevelDef
   chapter: ChapterId
@@ -36,6 +50,10 @@ export interface SceneProps {
   reducedMotion: boolean
   /** Increments when the player presses "reset view". */
   cameraResetKey: number
+  /** Camera button presses (turn, zoom, top view). */
+  cameraCommand?: CameraCommand | null
+  /** HUD coverage to keep the framed table clear of. Defaults to no insets. */
+  viewInsets?: ViewInsets
   onRunEvent: (event: RunEvent) => void
   /** Called once per run, when the simulation's outcome is decided (see sim.ts). */
   onRunEnd: (result: RunResult) => void

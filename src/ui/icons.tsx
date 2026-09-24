@@ -251,3 +251,64 @@ export function BackArrowIcon({ size, className }: IconProps) {
 export function ChevronIcon({ size, className }: IconProps) {
   return base(size, className, <path d="M9 5l7 7-7 7" />)
 }
+
+export function HandIcon({ size, className }: IconProps) {
+  return base(size, className, (
+    <g>
+      <path d="M8 12.5V5a1.5 1.5 0 0 1 3 0v6" />
+      <path d="M11 11V4a1.5 1.5 0 0 1 3 0v7" />
+      <path d="M14 11.3V5.5a1.5 1.5 0 0 1 3 0V13" />
+      <path d="M17 12v-3a1.5 1.5 0 0 1 3 0v7c0 3.3-2.2 5.5-6 5.5-3.1 0-4.6-1-5.8-2.6L4.8 14a1.6 1.6 0 0 1 2.3-2.2L8 13" />
+    </g>
+  ))
+}
+
+export function ZoomInIcon({ size, className }: IconProps) {
+  return base(size, className, (
+    <g>
+      <circle cx="11" cy="11" r="7" />
+      <line x1="16.2" y1="16.2" x2="21" y2="21" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+      <line x1="11" y1="8" x2="11" y2="14" />
+    </g>
+  ))
+}
+
+export function ZoomOutIcon({ size, className }: IconProps) {
+  return base(size, className, (
+    <g>
+      <circle cx="11" cy="11" r="7" />
+      <line x1="16.2" y1="16.2" x2="21" y2="21" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </g>
+  ))
+}
+
+export function TopViewIcon({ size, className }: IconProps) {
+  return base(size, className, (
+    <g>
+      <rect x="5" y="10" width="14" height="10" rx="1.4" />
+      <path d="M12 2v6M12 8l-2.6-2.6M12 8l2.6-2.6" />
+    </g>
+  ))
+}
+
+export function OrbitLeftIcon({ size, className }: IconProps) {
+  return base(size, className, (
+    <g>
+      <ellipse cx="12" cy="14" rx="8" ry="3.6" />
+      <path d="M6 6a8.4 8.4 0 0 0-2 4.4" />
+      <path d="M4 10.4l-1.6-1 2 -0.6" />
+    </g>
+  ))
+}
+
+export function OrbitRightIcon({ size, className }: IconProps) {
+  return base(size, className, (
+    <g>
+      <ellipse cx="12" cy="14" rx="8" ry="3.6" />
+      <path d="M18 6a8.4 8.4 0 0 1 2 4.4" />
+      <path d="M20 10.4l1.6-1-2 -0.6" />
+    </g>
+  ))
+}

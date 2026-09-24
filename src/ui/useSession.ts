@@ -1,13 +1,12 @@
 /*
  * Session state for one level (or the sandbox): the editor reducer, the play-mode machine
- * (build / run / result), run bookkeeping, and layout persistence. Pure UI glue: no rendering.
+ * (build / run / result) and run bookkeeping. Layouts live only for the session: a reload or a
+ * level change starts the table empty. Pure UI glue: no rendering.
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { editorReducer, initialEditor } from '../game/editor.ts'
-import { restoreLayout } from '../game/placement.ts'
-import { loadLayout, writeLayout } from '../game/storage.ts'
 import { mergeProgress, starsFor } from '../game/rules.ts'
-import type { EditorAction, LevelDef, LevelProgress, PlacedPiece, RunResult, SaveData, Vec3 } from '../game/types.ts'
+import type { EditorAction, LevelDef, LevelProgress, RunResult, SaveData, Vec3 } from '../game/types.ts'
 import type { PlayMode, RunEvent } from '../scene/sceneApi.ts'
 
 export interface SessionResult {
@@ -32,8 +31,6 @@ export interface Session {
   onRunEnd: (run: RunResult) => void
 }
 
-const LAYOUT_DEBOUNCE_MS = 300
-
 export function useSession(
   level: LevelDef,
   save: SaveData,
@@ -41,8 +38,8 @@ export function useSession(
 ): Session {
   const [editor, dispatch] = useReducer(
     (state: ReturnType<typeof initialEditor>, action: EditorAction) => editorReducer(level, state, action),
-    level,
-    (l) => initialEditor(restoreLayout(l, loadLayout(l.id))),
+    undefined,
+    () => initialEditor(),
   )
   const [mode, setMode] = useState<PlayMode>('build')
   const [runKey, setRunKey] = useState(0)
@@ -56,7 +53,7 @@ export function useSession(
   useEffect(() => {
     if (levelIdRef.current === level.id) return
     levelIdRef.current = level.id
-    dispatch({ type: 'reset', placed: restoreLayout(level, loadLayout(level.id)) })
+    dispatch({ type: 'reset', placed: [] })
     setMode('build')
     setRunKey(0)
     setSlowMo(false)
@@ -65,23 +62,9 @@ export function useSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level.id])
 
-  // Persist the in-progress layout, debounced, and flush it when leaving the level.
-  const latestPlaced = useRef(editor.placed)
-  latestPlaced.current = editor.placed
-  const saveLayout = useCallback((levelId: number, placed: PlacedPiece[]) => {
-    if (!writeLayout(levelId, placed)) console.warn(`Domino Topple: could not save the layout for level ${levelId}.`)
-  }, [])
-  useEffect(() => {
-    const timer = window.setTimeout(() => saveLayout(level.id, editor.placed), LAYOUT_DEBOUNCE_MS)
-    return () => window.clearTimeout(timer)
-  }, [level.id, editor.placed, saveLayout])
-  useEffect(() => {
-    const levelId = level.id
-    return () => saveLayout(levelId, latestPlaced.current)
-  }, [level.id, saveLayout])
-
+  // Starts a run from build mode, or replays the same layout from the result card.
   const go = useCallback(() => {
-    if (mode !== 'build') return
+    if (mode === 'run') return
     dispatch({ type: 'selectTool', kind: null })
     setResult(null)
     setGoalBurst(null)

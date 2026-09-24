@@ -9,7 +9,6 @@ import {
   footprintsOverlap,
   posesAlongPath,
   resolveCandidate,
-  restoreLayout,
   snap,
   snapAngle,
   supportHeight,
@@ -200,17 +199,4 @@ test('validateLayout: a valid layout returns null', () => {
     { id: 'p2', kind: 'domino', x: 5, y: 4, z: 0, rotY: 0 },
   ]
   assert.equal(validateLayout(level, placed), null)
-})
-
-test('restoreLayout: keeps legal pieces and drops off-table, overlapping and over-inventory ones', () => {
-  const level = makeLevel({ inventory: { domino: 2 } })
-  const restored = restoreLayout(level, [
-    { id: 'p1', kind: 'domino', x: 0, y: 0, z: 0, rotY: 0 },
-    { id: 'p2', kind: 'domino', x: 0.2, y: 0, z: 0, rotY: 0 }, // overlaps p1
-    { id: 'p3', kind: 'domino', x: 1e300, y: -1e300, z: 0, rotY: 0 }, // off the table
-    { id: 'p4', kind: 'domino', x: 20, y: 50, z: 0, rotY: 0 },
-    { id: 'p5', kind: 'domino', x: -20, y: 0, z: 0, rotY: 0 }, // beyond the tray's 2 dominoes
-  ])
-  assert.deepEqual(restored.map((p) => p.id), ['p1', 'p4'])
-  assert.equal(restored[1].y, 0, 'height is recomputed, not trusted')
 })
