@@ -35,7 +35,7 @@ const SHORTCUTS: [string, string][] = [
 const GESTURES = [
   'Drag with a piece selected: lay it on the table.',
   'Drag with Hand, or with two fingers: slide the view.',
-  'Pinch, or use the mouse wheel: zoom. Zoom right out to see the room.',
+  'Pinch, or use the mouse wheel: zoom. The zoom-out button, held past the table, shows the room.',
   'Turn the view with the ⟲ ⟳ buttons on the right, or the [ and ] keys.',
   'Drag a placed piece onto the dock to remove it.',
 ]

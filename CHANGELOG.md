@@ -6,7 +6,7 @@ All notable changes to Domino Topple are documented in this file, following the 
 
 ### Added
 
-- Each chapter is now a furnished room around the table: a study with a desk lamp, books, a bookshelf and a window; a garage with a pegboard of tools, a work lamp, a vice and a tool cabinet; and a playroom with blocks, a toy train, a teddy bear, bunting and a rug. Zooming out past the level's framing lowers the camera so the room comes into view.
+- Each chapter is now a furnished room around the table: a study with a desk lamp, books, a bookshelf and a window; a garage with a pegboard of tools, a work lamp, a vice and a tool cabinet; and a playroom with blocks, a toy train, a teddy bear, bunting and a rug. The zoom-out button or `-` key, past the level's framing, lowers the camera so the room comes into view.
 - Start and Goal tags float over the trigger and the goal, and a pulsing ring marks the goal.
 - A selected piece shows Turn and Remove buttons right above it.
 - Camera buttons on the right turn the view, zoom, switch to a top view and reset it. `[` and `]` turn the view, `+` and `-` zoom, `T` toggles the top view and `V` picks the Hand tool.

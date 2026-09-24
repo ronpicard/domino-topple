@@ -119,7 +119,9 @@ function clampCamera(s: CamPose, table: LevelDef['table'], maxDistance: number):
 /**
  * The pitch a zoom level implies while not in top view: the level's own framing pitch up to the
  * fitted distance, easing down to OVERVIEW_PITCH at the zoom-out limit (twice the fitted
- * distance), so backing off from the table turns into stepping back to look around the room.
+ * distance). Only the explicit zoom-out command lowers the camera to this (stepping back to look
+ * around the room); wheel and pinch zoom never tilt the view, though zooming back in by any means
+ * raises it to the framing pitch again.
  */
 function pitchForDistance(distance: number, fittedDistance: number, framingPitch: number): number {
   const t = clamp((distance - fittedDistance) / Math.max(1, fittedDistance), 0, 1)
@@ -406,6 +408,9 @@ export function CameraRig({
         break
       case 'zoomOut':
         goal.current.distance = clamp(goal.current.distance * 1.33, MIN_DISTANCE, maxDistance.current)
+        if (goal.current.pitch < 1.3) {
+          goal.current.pitch = pitchForDistance(goal.current.distance, fittedDistance.current, defaultPitch.current)
+        }
         break
       case 'toggleTop':
         if (goal.current.pitch < 1.3) {
@@ -563,10 +568,11 @@ export function CameraRig({
         goal.current.target[2] += (focus[2] - goal.current.target[2]) * a
       }
     }
-    // Outside top view the pitch follows the zoom: framing pitch near the table, overview pitch
-    // when backed right off.
+    // Outside top view, zooming in lifts a lowered (overview) camera back toward the framing
+    // pitch; nothing here ever lowers it.
     if (goal.current.pitch < 1.3) {
-      goal.current.pitch = pitchForDistance(goal.current.distance, fittedDistance.current, defaultPitch.current)
+      const implied = pitchForDistance(goal.current.distance, fittedDistance.current, defaultPitch.current)
+      if (goal.current.pitch < implied) goal.current.pitch = implied
     }
     clampCamera(goal.current, level.table, maxDistance.current)
     const a = 1 - Math.exp(-dtClamped / 0.12)

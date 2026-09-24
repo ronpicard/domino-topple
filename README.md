@@ -30,7 +30,7 @@ Each level awards up to three stars: one for reaching the goal, one for using no
 | `C` | Reset the camera |
 | `H` | Help |
 
-Dragging on the table always builds; it never turns the view. The camera buttons on the right turn the view, zoom, switch to a top view and reset it. With the Hand tool, drag the table to slide the view. On a touch screen, drag with two fingers to slide the view and pinch to zoom. With a mouse, middle-drag slides the view and the wheel zooms toward the cursor. The camera frames the whole table around the on-screen controls, and follows the chain during a run until you move it yourself. Zooming out past that framing lowers the camera to show the room; it never leaves the room's walls.
+Dragging on the table always builds; it never turns the view. The camera buttons on the right turn the view, zoom, switch to a top view and reset it. With the Hand tool, drag the table to slide the view. On a touch screen, drag with two fingers to slide the view and pinch to zoom. With a mouse, middle-drag slides the view and the wheel zooms toward the cursor. The camera frames the whole table around the on-screen controls, and follows the chain during a run until you move it yourself. The zoom-out button (or `-`) past that framing lowers the camera to show the room; the wheel and pinch only zoom, and the camera never leaves the room's walls.
 
 ## Levels
 
