@@ -64,13 +64,13 @@ The browser and the test suite use the same simulation code, and a run with the 
 
 The layout follows the screen: a single dock along the bottom with GO at its end on wide screens, and a taller dock above a full-width GO button on phones held upright. On a portrait screen the camera turns to look down the table's long side, so the whole level fits. Touch targets are sized for thumbs, and the safe areas around notches are respected.
 
-The graphics come in three tiers. High adds ambient occlusion, a tilt-shift depth of field, bloom and anti-aliasing. Medium keeps bloom and the vignette. Low renders directly with no post-processing. With the Quality setting on Auto, the game measures its own frame time when a level opens and picks a tier. Reduced motion, from the Settings dialog or the system preference, turns off the camera follow, confetti and the menu's attract loop.
+The graphics come in three tiers. High adds ambient occlusion, bloom and anti-aliasing. Medium keeps bloom and the vignette. Low renders directly with no post-processing. With the Quality setting on Auto, the game measures its own frame time when a level opens and picks a tier. Reduced motion, from the Settings dialog or the system preference, turns off the camera follow, confetti and the menu's attract loop.
 
 ## Tech stack
 
 - React 19 and TypeScript for the menu, level select, HUD, dock and dialogs
 - react-three-fiber, drei and three.js for the dioramas: physically based materials, soft shadows, an environment light, and instanced dominoes, so a long row costs one draw call
-- @react-three/postprocessing for ambient occlusion, bloom, tilt-shift and tone mapping
+- @react-three/postprocessing for ambient occlusion, bloom and tone mapping
 - Rapier (`@dimforge/rapier3d-compat`), used directly instead of through a React wrapper, so the browser and the Node tests share one deterministic simulation
 - Web Audio, synthesised in code at runtime, with no audio files
 - Vite for building and development

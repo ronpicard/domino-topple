@@ -19,6 +19,7 @@ All notable changes to Domino Topple are documented in this file, following the 
 - A line above the dock says what to do next, starting with the level's own hint, and the first-visit tip only appears once a few dominoes are down.
 - Clear empties the table at once, without a confirmation. Undo brings the pieces back.
 - The table starts empty whenever a level opens or the page is reloaded; layouts are no longer saved between visits.
+- The tilt-shift blur is gone from the High graphics tier, so the whole table stays sharp.
 
 ### Fixed
 

@@ -126,7 +126,7 @@ export function GameCanvas(props: SceneProps) {
               onRunEnd={onRunEnd}
               silent={silent}
             />
-            <Effects quality={quality} mode={mode} goalBurst={goalBurst} reducedMotion={reducedMotion} />
+            <Effects quality={quality} goalBurst={goalBurst} reducedMotion={reducedMotion} />
           </GestureContext.Provider>
         </SimContext.Provider>
       </Canvas>
